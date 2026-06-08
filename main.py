@@ -1,4 +1,4 @@
-import os
+import uuid
 from dotenv import load_dotenv
 from datetime import datetime
 
@@ -6,11 +6,17 @@ from langchain_ollama import ChatOllama
 from langchain.agents import create_agent
 import gradio as gr
 
+from langgraph.checkpoint.sqlite import SqliteSaver
+import sqlite3
+
 load_dotenv()
 
 def get_date():
     """Get the current date"""
     return datetime.now().strftime("%Y-%m-%d")
+
+conn = sqlite3.connect("chatbot_memory.db", check_same_thread=False)
+checkpointer = SqliteSaver(conn)
 
 llm = ChatOllama(model="qwen2.5:3b")
 
@@ -20,16 +26,23 @@ Answer all user's queries.
 Use the get_date tool if the user is asking about today's date.
 """
 
-agent = create_agent(model=llm, tools=[get_date], system_prompt=system_prompt)
+agent = create_agent(model=llm,
+                     tools=[get_date],
+                     system_prompt=system_prompt,
+                     checkpointer=checkpointer)
 
-def chat(message, history):
+def chat(message, history, thread_id):
+    config = {"configurable": {"thread_id": thread_id}}
     response = agent.invoke(
-        {"messages": [{"role": "user", "content": message}]})
+        {"messages": [{"role": "user", "content": message}]},
+        config
+    )
     last_response = response['messages'][-1].content
     return last_response
 
 with gr.Blocks() as demo:
     gr.Markdown("# AI Chatbot")
-    gr.ChatInterface(fn=chat)
+    thread_id = gr.State(value=lambda: str(uuid.uuid4()))
+    gr.ChatInterface(fn=chat, additional_inputs=[thread_id])
 
 demo.launch()
